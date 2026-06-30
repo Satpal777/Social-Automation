@@ -3,6 +3,7 @@ export interface PromptSpec {
   user: string;
   maxTokens?: number;
   temperature?: number;
+  tier?: 'fast' | 'smart';
 }
 
 export interface LLMResult {

@@ -64,6 +64,7 @@ ${
     : ''
 }`,
       temperature: 0.8,
+      tier: 'fast' as const,
     };
 
     try {

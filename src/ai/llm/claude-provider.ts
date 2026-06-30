@@ -20,9 +20,16 @@ export class ClaudeProvider implements LLMProvider {
     return this.client;
   }
 
+  private resolveModel(tier?: 'fast' | 'smart'): string {
+    if (tier === 'fast') {
+      return env.LLM_FAST_MODEL || 'claude-3-5-haiku-20241022';
+    }
+    return env.LLM_SMART_MODEL || env.ANTHROPIC_MODEL;
+  }
+
   async generate(prompt: PromptSpec): Promise<LLMResult> {
     const client = this.getClient();
-    const model = env.ANTHROPIC_MODEL;
+    const model = this.resolveModel(prompt.tier);
 
     const runCall = async () => {
       try {

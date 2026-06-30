@@ -41,12 +41,10 @@ function buildPrompt(
   recentHooks: string[],
   voice: string
 ) {
+  let spec;
   if (format === 'text' || format === 'image' || format === 'infographic') {
-    return buildTextPostPrompt({ pillar, topic, recentHooks, voice });
-  }
-
-  // Fallback / Carousel prompt
-  if (format === 'carousel') {
+    spec = buildTextPostPrompt({ pillar, topic, recentHooks, voice });
+  } else if (format === 'carousel') {
     const textSpec = buildTextPostPrompt({ pillar, topic, recentHooks, voice });
     const system = `${textSpec.system.replace(
       'Return your response ONLY as a valid JSON object.',
@@ -66,11 +64,8 @@ The JSON schema must include "slides":
     }
   ] (3-10 slides)
 }`;
-    return { ...textSpec, system };
-  }
-
-  // Fallback / Poll prompt
-  if (format === 'poll') {
+    spec = { ...textSpec, system };
+  } else if (format === 'poll') {
     const textSpec = buildTextPostPrompt({ pillar, topic, recentHooks, voice });
     const system = `${textSpec.system.replace(
       'Return your response ONLY as a valid JSON object.',
@@ -86,10 +81,13 @@ The JSON schema must include "pollQuestion" and "pollOptions":
   "pollQuestion": "string (max 100 chars, the main poll question)",
   "pollOptions": ["string", "string"] (2-4 options, max 30 chars each)
 }`;
-    return { ...textSpec, system };
+    spec = { ...textSpec, system };
+  } else {
+    throw new ValidationError(`Unsupported content format: ${format}`);
   }
 
-  throw new ValidationError(`Unsupported content format: ${format}`);
+  spec.tier = 'smart';
+  return spec;
 }
 
 /**

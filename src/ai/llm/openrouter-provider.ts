@@ -5,26 +5,34 @@ import { withRetry } from '../../lib/retry.js';
 import { LLMProviderError } from '../../lib/errors.js';
 import type { LLMProvider, LLMResult, PromptSpec } from './types.js';
 
-export class OpenAIProvider implements LLMProvider {
+export class OpenRouterProvider implements LLMProvider {
   private client: OpenAI | null = null;
-  private readonly log = logger.child({ module: 'openai-provider' });
+  private readonly log = logger.child({ module: 'openrouter-provider' });
 
   private getClient(): OpenAI {
     if (!this.client) {
-      const apiKey = env.OPENAI_API_KEY;
+      const apiKey = env.OPENROUTER_API_KEY;
       if (!apiKey) {
-        throw new LLMProviderError('OPENAI_API_KEY is not configured');
+        throw new LLMProviderError('OPENROUTER_API_KEY is not configured');
       }
-      this.client = new OpenAI({ apiKey });
+      this.client = new OpenAI({
+        apiKey,
+        baseURL: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': env.APP_BASE_URL,
+          'X-Title': 'LinkedIn Content Automation',
+        },
+      });
     }
     return this.client;
   }
 
   private resolveModel(tier?: 'fast' | 'smart'): string {
     if (tier === 'fast') {
-      return env.LLM_FAST_MODEL || 'gpt-4o-mini';
+      return env.LLM_FAST_MODEL || 'meta-llama/llama-3-8b-instruct:free';
     }
-    return env.LLM_SMART_MODEL || env.OPENAI_MODEL;
+    // Default to smart
+    return env.LLM_SMART_MODEL || env.OPENROUTER_MODEL;
   }
 
   async generate(prompt: PromptSpec): Promise<LLMResult> {
@@ -33,7 +41,7 @@ export class OpenAIProvider implements LLMProvider {
 
     const runCall = async () => {
       try {
-        this.log.info({ model }, 'Sending request to OpenAI API');
+        this.log.info({ model, tier: prompt.tier }, 'Sending request to OpenRouter API');
         const completion = await client.chat.completions.create({
           model,
           messages: [
@@ -47,7 +55,7 @@ export class OpenAIProvider implements LLMProvider {
         const choice = completion.choices[0];
         const content = choice?.message?.content;
         if (content === null || content === undefined) {
-          throw new LLMProviderError('OpenAI response was empty');
+          throw new LLMProviderError('OpenRouter response was empty');
         }
 
         return {
@@ -60,20 +68,21 @@ export class OpenAIProvider implements LLMProvider {
         };
       } catch (err: any) {
         if (err instanceof LLMProviderError) throw err;
-        throw new LLMProviderError(`OpenAI API request failed: ${err.message}`, { cause: err });
+        throw new LLMProviderError(`OpenRouter API request failed: ${err.message}`, { cause: err });
       }
     };
 
-    return withRetry(runCall, { label: 'LLM generate (OpenAI)' });
+    return withRetry(runCall, { label: 'LLM generate (OpenRouter)' });
   }
 
   async embed(text: string): Promise<number[]> {
     const client = this.getClient();
-    const model = 'text-embedding-3-small';
+    // Use standard embedding model available on OpenRouter or fallback to local representation
+    const model = 'openai/text-embedding-3-small';
 
     const runCall = async () => {
       try {
-        this.log.info('Generating embedding via OpenAI API');
+        this.log.info('Generating embedding via OpenRouter API');
         const response = await client.embeddings.create({
           model,
           input: text,
@@ -81,16 +90,16 @@ export class OpenAIProvider implements LLMProvider {
 
         const embedding = response.data[0]?.embedding;
         if (!embedding) {
-          throw new LLMProviderError('OpenAI embedding response was empty');
+          throw new LLMProviderError('OpenRouter embedding response was empty');
         }
 
         return embedding;
       } catch (err: any) {
         if (err instanceof LLMProviderError) throw err;
-        throw new LLMProviderError(`OpenAI Embedding request failed: ${err.message}`, { cause: err });
+        throw new LLMProviderError(`OpenRouter Embedding request failed: ${err.message}`, { cause: err });
       }
     };
 
-    return withRetry(runCall, { label: 'LLM embed (OpenAI)' });
+    return withRetry(runCall, { label: 'LLM embed (OpenRouter)' });
   }
 }

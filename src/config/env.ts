@@ -41,11 +41,15 @@ const envSchema = z.object({
   POSTGRES_DB: z.string().optional(),
 
   // --- LLM providers -------------------------------------------------------
-  LLM_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
+  LLM_PROVIDER: z.enum(['anthropic', 'openai', 'openrouter']).default('anthropic'),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o'),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL: z.string().default('meta-llama/llama-3-8b-instruct:free'),
+  LLM_FAST_MODEL: z.string().optional(),
+  LLM_SMART_MODEL: z.string().optional(),
 
   // --- Image generation ----------------------------------------------------
   IMAGE_PROVIDER: z.enum(['openai', 'stability', 'none']).default('none'),
