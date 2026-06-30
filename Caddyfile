@@ -1,0 +1,22 @@
+# ── Production reverse proxy & Automatic TLS ────────────────────────────────
+{$DOMAIN:localhost} {
+    reverse_proxy app:3000
+    
+    # Enable gzip compression
+    encode gzip
+    
+    # Custom headers for security
+    header {
+        # Disable FLoC tracking
+        Permissions-Policy "interest-cohort=()"
+        
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

@@ -1,0 +1,213 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────
+
+enum ContentStatus {
+  generated
+  pending_review
+  approved
+  scheduled
+  publishing
+  published
+  failed
+  rejected
+  manual_required
+}
+
+enum ContentFormat {
+  text
+  image
+  carousel
+  infographic
+  poll
+}
+
+enum PublishMode {
+  draft
+  auto
+  silent
+}
+
+enum AssetType {
+  image
+  pdf
+  infographic
+}
+
+enum ReviewActionType {
+  approve
+  reject
+  edit
+}
+
+// ── Tables ───────────────────────────────────────────────────────────────
+
+model ContentItem {
+  id              String        @id @default(uuid()) @db.Uuid
+  pillar          String
+  format          ContentFormat
+  status          ContentStatus
+  mode            PublishMode
+  title           String?
+  hook            String
+  body            String
+  hashtags        String[]
+  cta             String?
+  language        String        @default("en")
+  scheduledAt     DateTime?     @map("scheduled_at") @db.Timestamptz()
+  publishedAt     DateTime?     @map("published_at") @db.Timestamptz()
+  linkedinUrn     String?       @map("linkedin_urn")
+  linkedinUrl     String?       @map("linkedin_url")
+  sourceTopicId   String?       @map("source_topic_id") @db.Uuid
+  generationMeta  Json?         @map("generation_meta")
+  dedupeKey       String?       @unique @map("dedupe_key")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+
+  // Relations
+  sourceTopic   Topic?         @relation(fields: [sourceTopicId], references: [id])
+  assets        Asset[]
+  publishLogs   PublishLog[]
+  analytics     Analytic[]
+  reviewActions ReviewAction[]
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([pillar, createdAt])
+  @@map("content_items")
+}
+
+model Asset {
+  id            String    @id @default(uuid()) @db.Uuid
+  contentItemId String    @map("content_item_id") @db.Uuid
+  type          AssetType
+  path          String
+  mime          String
+  width         Int?
+  height        Int?
+  meta          Json?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  // Relations
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@map("assets")
+}
+
+model Topic {
+  id        String   @id @default(uuid()) @db.Uuid
+  pillar    String
+  source    String
+  title     String
+  url       String?
+  raw       Json?
+  summary   String?
+  usedAt    DateTime? @map("used_at") @db.Timestamptz()
+  fetchedAt DateTime  @default(now()) @map("fetched_at") @db.Timestamptz()
+
+  // Relations
+  contentItems ContentItem[]
+
+  @@index([pillar, fetchedAt])
+  @@index([usedAt])
+  @@map("topics")
+}
+
+model Schedule {
+  id              String      @id @default(uuid()) @db.Uuid
+  name            String
+  cron            String
+  timezone        String      @default("UTC")
+  pillarRotation  Json        @map("pillar_rotation")
+  formatRotation  Json        @map("format_rotation")
+  mode            PublishMode
+  enabled         Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@map("schedules")
+}
+
+model PublishLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  contentItemId String   @map("content_item_id") @db.Uuid
+  attempt       Int
+  status        String   // "success" | "failure"
+  request       Json?
+  response      Json?
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  // Relations
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@map("publish_logs")
+}
+
+model Analytic {
+  id            String   @id @default(uuid()) @db.Uuid
+  contentItemId String   @map("content_item_id") @db.Uuid
+  impressions   Int?
+  likes         Int?
+  comments      Int?
+  shares        Int?
+  clicks        Int?
+  fetchedAt     DateTime @default(now()) @map("fetched_at") @db.Timestamptz()
+
+  // Relations
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@index([contentItemId, fetchedAt])
+  @@map("analytics")
+}
+
+model OAuthToken {
+  id            String    @id @default(uuid()) @db.Uuid
+  provider      String
+  accessToken   String    @map("access_token")
+  refreshToken  String?   @map("refresh_token")
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz()
+  scope         String
+  memberUrn     String?   @map("member_urn")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@unique([provider])
+  @@map("oauth_tokens")
+}
+
+model ReviewAction {
+  id            String          @id @default(uuid()) @db.Uuid
+  contentItemId String          @map("content_item_id") @db.Uuid
+  channel       String          // e.g. "telegram"
+  action        ReviewActionType
+  actor         String
+  payload       Json?
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+
+  // Relations
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@map("review_actions")
+}
+
+model PromptTemplate {
+  id       String        @id @default(uuid()) @db.Uuid
+  format   ContentFormat
+  version  Int
+  template String
+  active   Boolean       @default(false)
+
+  @@unique([format, version])
+  @@map("prompt_templates")
+}
