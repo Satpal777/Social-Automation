@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammY';
+import { Bot, InlineKeyboard } from 'grammy';
 import { env } from '../config/env.js';
 import { logger } from '../monitoring/logger.js';
 import { contentItemRepository } from '../db/repositories/content-item.repository.js';
@@ -169,7 +169,11 @@ export function initBot(): Bot | null {
 
   // Start the bot
   if (env.TELEGRAM_USE_WEBHOOK) {
-    log.info('Telegram Bot configured to use Webhooks');
+    const webhookUrl = `${env.APP_BASE_URL}/telegram/webhook`;
+    log.info({ webhookUrl }, 'Registering Telegram Bot webhook');
+    bot.api.setWebhook(webhookUrl).catch((err) => {
+      log.error({ err }, 'Failed to register Telegram webhook');
+    });
   } else {
     log.info('Starting Telegram Bot long-polling');
     bot.start().catch((err) => {
@@ -177,6 +181,13 @@ export function initBot(): Bot | null {
     });
   }
 
+  return bot;
+}
+
+/**
+ * Retrieve the initialized bot instance (or null if Telegram is not configured).
+ */
+export function getBot(): Bot | null {
   return bot;
 }
 

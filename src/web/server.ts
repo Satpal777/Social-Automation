@@ -1,8 +1,11 @@
 import Fastify from 'fastify';
+import { webhookCallback } from 'grammy';
 import { logger } from '../monitoring/logger.js';
 import { prisma } from '../db/client.js';
+import { env } from '../config/env.js';
 import { oauthTokenRepository } from '../db/repositories/oauth-token.repository.js';
 import { getAuthorizationUrl, exchangeCode } from '../linkedin/oauth.js';
+import { getBot } from '../review/bot.js';
 
 export function buildServer() {
   const server = Fastify({
@@ -98,10 +101,15 @@ export function buildServer() {
     }
   });
 
-  // ── Telegram webhook placeholder (Phase 3) ─────────────────────────────
-  server.post('/telegram/webhook', async (_request, reply) => {
-    return reply.status(501).send({ error: 'Telegram webhook not yet implemented' });
-  });
+  // ── Telegram webhook ────────────────────────────────────────────────────
+  const bot = getBot();
+  if (env.TELEGRAM_USE_WEBHOOK && bot) {
+    server.post('/telegram/webhook', webhookCallback(bot, 'fastify'));
+  } else {
+    server.post('/telegram/webhook', async (_request, reply) => {
+      return reply.status(501).send({ error: 'Telegram webhook not enabled' });
+    });
+  }
 
   // ── Global error handler ───────────────────────────────────────────────
   server.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {

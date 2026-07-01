@@ -1,5 +1,6 @@
 export {
   initBot,
+  getBot,
   sendDraftToTelegram,
   sendAlertToTelegram,
   sendManualRequiredToTelegram,
