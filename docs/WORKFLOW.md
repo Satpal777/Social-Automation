@@ -107,6 +107,20 @@ fired at the intended post time).
 Mode is configured **per schedule slot** (`schedules.mode`), so different slots can behave
 differently (e.g. weekday Auto, weekend Draft).
 
+## On-demand generation (`/generate`)
+Besides the scheduler, a post can be produced on demand from Telegram with the `/generate` command
+(`src/review/bot.ts`). It runs the **same pipeline** (`runContentJob`) as a scheduled slot, but
+always in **Draft mode** — so it is delivered to Telegram for review and **never auto-posts**;
+publishing happens only if you tap **Approve & Post**.
+
+- `/generate` → defaults to pillar `software-engineering`, format `text`.
+- `/generate <format>` → e.g. `/generate carousel` (default pillar).
+- `/generate <pillar> <format>` → e.g. `/generate ai-technology-updates image`.
+- Arguments are order-tolerant and case-insensitive; parsing lives in
+  `src/review/parse-generate-args.ts`. An invalid/ambiguous argument returns a helpful error.
+- `/generate poll` follows the normal poll path: `manual_required` with manual-posting instructions.
+- The command (and `/status`) only responds to the configured `TELEGRAM_CHAT_ID`.
+
 ## Quality gates (applied in step 2)
 - **Length/format** validation per format.
 - **Hashtag policy** (count + relevance; see `docs/CONTENT_STRATEGY.md`).
