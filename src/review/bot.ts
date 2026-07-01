@@ -6,13 +6,27 @@ import { reviewActionRepository } from '../db/repositories/review-action.reposit
 import { prisma } from '../db/client.js';
 import { publish } from '../linkedin/publish.js';
 import { formatPostText } from '../linkedin/publishers/text.js';
+import { runContentJob } from '../content/orchestrator.js';
+import { parseGenerateArgs, KNOWN_PILLARS } from './parse-generate-args.js';
 import type { ContentItem } from '@prisma/client';
+import type { Context } from 'grammy';
 
 let bot: Bot | null = null;
 const log = logger.child({ module: 'review-bot' });
 
 // Maps telegram user ID string to content item ID string
 const editingState = new Map<string, string>();
+
+/**
+ * Whether an incoming update comes from the configured Telegram chat. When
+ * TELEGRAM_CHAT_ID is unset we cannot verify, so we allow it (the send helpers
+ * already warn about the missing chat id). Used to gate token-spending commands.
+ */
+function isAuthorizedChat(ctx: Context): boolean {
+  const allowed = env.TELEGRAM_CHAT_ID;
+  if (!allowed) return true;
+  return String(ctx.chat?.id) === allowed;
+}
 
 /**
  * Initialize the GrammY Telegram Bot.
@@ -29,19 +43,59 @@ export function initBot(): Bot | null {
   // ── Commands ───────────────────────────────────────────────────────────
   bot.command('start', async (ctx) => {
     await ctx.reply(
-      '🤖 *LinkedIn Content Automation Bot* is active!\n\nI will deliver draft posts for review and notify you of publish actions.',
+      '🤖 *LinkedIn Content Automation Bot* is active!\n\n' +
+        'I deliver draft posts for review and notify you of publish actions.\n\n' +
+        '*Commands*\n' +
+        '• `/generate [pillar] [format]` — generate a post on demand and send it here for review (nothing is auto‑posted).\n' +
+        '• `/status` — pending review / manual counts.\n\n' +
+        `Formats: text, image, carousel, infographic, poll\n` +
+        `Pillars: ${KNOWN_PILLARS.join(', ')}`,
       { parse_mode: 'Markdown' }
     );
   });
 
   bot.command('status', async (ctx) => {
+    if (!isAuthorizedChat(ctx)) return;
+
     const pendingCount = (await contentItemRepository.findByStatus('pending_review')).length;
     const manualCount = (await contentItemRepository.findByStatus('manual_required')).length;
-    
+
     await ctx.reply(
       `📊 **Status Report**\n\n- Pending Review: ${pendingCount}\n- Manual Required (Polls): ${manualCount}`,
       { parse_mode: 'Markdown' }
     );
+  });
+
+  // On-demand generation: build a draft now and send it here for review.
+  // Never auto-posts — publishing only happens if the user taps "Approve & Post".
+  bot.command('generate', async (ctx) => {
+    if (!isAuthorizedChat(ctx)) return;
+
+    const parsed = parseGenerateArgs(ctx.match);
+    if (!parsed.ok) {
+      await ctx.reply(`⚠️ ${parsed.error}`);
+      return;
+    }
+
+    const { pillar, format } = parsed;
+    await ctx.reply(
+      `⏳ Generating a *${format}* post for *${pillar}*… this can take a moment.`,
+      { parse_mode: 'Markdown' }
+    );
+
+    try {
+      const item = await runContentJob({ pillar, format, mode: 'draft' });
+
+      // Polls can't be posted via the official API — deliver manual instructions.
+      if (item.status === 'manual_required') {
+        await sendManualRequiredToTelegram(item);
+      } else {
+        await sendDraftToTelegram(item);
+      }
+    } catch (err: any) {
+      log.error({ err, pillar, format }, 'On-demand /generate failed');
+      await ctx.reply(`❌ Generation failed: ${err.message}`);
+    }
   });
 
   // ── Callback queries (Inline Buttons) ──────────────────────────────────
