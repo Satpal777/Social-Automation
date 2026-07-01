@@ -26,7 +26,6 @@ export function getLLMProvider(): LLMProvider {
   } else if (providerType === 'openrouter') {
     cachedProvider = new OpenRouterProvider();
   } else {
-    // Default to anthropic
     cachedProvider = new ClaudeProvider();
   }
 
