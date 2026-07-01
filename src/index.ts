@@ -14,7 +14,7 @@ import { env } from './config/env.js';
 import { logger } from './monitoring/logger.js';
 import { startServer } from './web/server.js';
 import { prisma } from './db/client.js';
-import { initBot } from './review/index.js';
+import { initBot, sendAlertToTelegram } from './review/index.js';
 import { startScheduler, stopScheduler } from './scheduler/index.js';
 
 async function main() {
@@ -29,8 +29,17 @@ async function main() {
   // Start web server
   const server = await startServer(env.PORT);
 
-  // Start scheduler
-  await startScheduler();
+  // Start scheduler. A failure here (e.g. a transient DB hiccup) must not
+  // take down the web server / Telegram bot that are already serving traffic.
+  try {
+    await startScheduler();
+  } catch (err) {
+    logger.error({ err }, 'Scheduler failed to start — web server and Telegram bot remain up');
+    await sendAlertToTelegram(
+      `Scheduler failed to start: ${(err as Error).message}. The bot and web server are still running, but no cron jobs are registered.`,
+      'critical'
+    ).catch(() => {});
+  }
 
   // ── Graceful shutdown ────────────────────────────────────────────────
   const shutdown = async (signal: string) => {

@@ -73,7 +73,9 @@ export async function runContentJob(slot: SlotConfig): Promise<ContentItem> {
   const format = slot.format || 'text';
 
   // 2. RESEARCH - Get topics
+  log.info({ pillar }, 'Research phase starting');
   const topics = await ResearchService.findTopics(pillar);
+  log.info({ pillar, topicsFound: topics.length }, 'Research phase complete');
   if (topics.length === 0) {
     throw new Error(`No research topics found or generated for pillar: ${pillar}`);
   }
@@ -91,15 +93,17 @@ export async function runContentJob(slot: SlotConfig): Promise<ContentItem> {
   const maxUniquenessAttempts = 3;
 
   for (let attempt = 1; attempt <= maxUniquenessAttempts; attempt++) {
+    log.info({ attempt, format }, 'Generating candidate content');
     const candidate = await generateContent(pillar, format, selectedTopic, recentHooks);
-    
+
     // Check uniqueness gate
     const isUnique = await checkUniqueness(candidate);
     if (isUnique) {
+      log.info({ attempt }, 'Uniqueness gate passed');
       generated = candidate;
       break;
     }
-    
+
     log.warn({ attempt }, 'Generated content failed uniqueness check. Regenerating.');
   }
 
@@ -108,6 +112,15 @@ export async function runContentJob(slot: SlotConfig): Promise<ContentItem> {
       `Failed to generate unique content for topic: "${selectedTopic.title}" after ${maxUniquenessAttempts} attempts.`
     );
   }
+
+  log.info(
+    {
+      hookLength: generated.hook.length,
+      bodyLength: generated.body.length,
+      hashtagCount: generated.hashtags.length,
+    },
+    'Content generation succeeded'
+  );
 
   // 4. Determine status based on publishing mode and format
   // Polls always become manual_required (API limit)
@@ -178,11 +191,13 @@ export async function runContentJob(slot: SlotConfig): Promise<ContentItem> {
     if (imageProvider) {
       try {
         log.info('Generating AI image asset');
-        const imgPrompt = `Conceptual minimalist flat vector illustration, tech theme, representing: "${contentItem.title}". Dark mode background, professional, clean design.`;
-        const buffer = await imageProvider.generate(imgPrompt);
+        const imgPrompt = `Detailed, content-rich digital illustration for a LinkedIn tech post titled: "${contentItem.title}". Context: ${contentItem.hook}
+Depict the concrete idea, not an abstract mood: include specific, recognizable visual elements tied directly to the topic — e.g. relevant diagrams, workflow steps, code/UI fragments, system components, or labeled icons that make the technical concept legible at a glance. Compose it as a dense, information-rich editorial scene (not a single minimalist icon or empty abstract background). Professional tech-editorial style, dark background, vibrant accent colors, high detail, suitable as a LinkedIn hero image.`;
+        const { buffer, mime } = await imageProvider.generate(imgPrompt);
 
         await fs.mkdir(env.ASSETS_DIR, { recursive: true });
-        const imgFilename = `${contentItem.id}-image.png`;
+        const ext = mime === 'image/png' ? 'png' : 'jpg';
+        const imgFilename = `${contentItem.id}-image.${ext}`;
         const imgPath = path.join(env.ASSETS_DIR, imgFilename);
 
         await fs.writeFile(imgPath, buffer);
@@ -191,9 +206,9 @@ export async function runContentJob(slot: SlotConfig): Promise<ContentItem> {
           contentItem: { connect: { id: contentItem.id } },
           type: 'image',
           path: imgPath,
-          mime: 'image/png',
+          mime,
         });
-        log.info({ imgPath }, 'AI image asset successfully generated and saved');
+        log.info({ imgPath, mime }, 'AI image asset successfully generated and saved');
       } catch (err) {
         log.error({ err }, 'Failed to generate AI image asset');
       }

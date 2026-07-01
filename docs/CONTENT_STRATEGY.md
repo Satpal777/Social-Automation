@@ -21,7 +21,7 @@ Pillars cycle via `schedules.pillar_rotation` so the feed stays varied.
 | Format | Asset | Notes |
 |--------|-------|-------|
 | `text` | none | The workhorse. Strong hook + scannable body + CTA. |
-| `image` | PNG | Text post + branded hero image (template, optional AI image). |
+| `image` | PNG | Text post + AI-generated hero image. Must be content-rich and specific to the topic (diagrams, workflow steps, labeled components) — never a plain minimalist icon or abstract mood image. |
 | `carousel` | PDF | Multi-slide document; high reach format. |
 | `infographic` | PNG | Single dense visual (data/checklist/comparison). |
 | `poll` | none | Generated but `manual_required` (API limitation). |
@@ -96,3 +96,9 @@ rather than publishing.
   service **dedupes** against `topics.used_at` so stories aren't repeated.
 - Without research APIs configured, the system falls back to LLM ideation seeded by the pillar and
   recent-post history.
+- **Grounding source priority: social platforms first.** When Tavily (`SEARCH_API_KEY`) is
+  configured, the search is biased toward live developer-community chatter — Reddit, Hacker News,
+  X/Twitter, dev.to, Lobsters — rather than news-wire articles, so topics reflect what
+  practitioners are *currently* discussing, not just press releases. If that search comes up thin
+  (< 3 results), it broadens to the open web automatically. See `SOCIAL_SEARCH_DOMAINS` in
+  `src/ai/research/research-service.ts`.

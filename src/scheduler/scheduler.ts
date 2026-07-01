@@ -11,6 +11,7 @@ import {
 import { logger } from '../monitoring/logger.js';
 import { fetchAnalytics } from '../analytics/index.js';
 import { env } from '../config/env.js';
+import { withRetry } from '../lib/retry.js';
 import type { ContentItem, Schedule } from '@prisma/client';
 
 const activeCronJobs = new Map<string, Cron>();
@@ -110,7 +111,11 @@ async function triggerScheduleJob(schedule: Schedule) {
  * Seed a default schedule slot if the database is empty.
  */
 async function seedDefaultScheduleIfEmpty() {
-  const count = await prisma.schedule.count();
+  // Wrapped in retry: on a cold Neon endpoint the first connection after a
+  // period of inactivity can time out while the database wakes up.
+  const count = await withRetry(() => prisma.schedule.count(), {
+    label: 'db:schedule.count (startup)',
+  });
   if (count === 0) {
     log.info('No posting schedules found in database. Seeding a default daily draft schedule.');
     await scheduleRepository.create({

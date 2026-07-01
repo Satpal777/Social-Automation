@@ -47,14 +47,17 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o'),
   OPENROUTER_API_KEY: z.string().optional(),
-  OPENROUTER_MODEL: z.string().default('meta-llama/llama-3-8b-instruct:free'),
+  OPENROUTER_MODEL: z.string().default('openrouter/free'),
   LLM_FAST_MODEL: z.string().optional(),
   LLM_SMART_MODEL: z.string().optional(),
 
   // --- Image generation ----------------------------------------------------
-  IMAGE_PROVIDER: z.enum(['openai', 'stability', 'none']).default('none'),
+  IMAGE_PROVIDER: z.enum(['openai', 'stability', 'cloudflare', 'none']).default('none'),
   OPENAI_IMAGE_MODEL: z.string().default('gpt-image-1'),
   STABILITY_API_KEY: z.string().optional(),
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
+  CLOUDFLARE_API_TOKEN: z.string().optional(),
+  CLOUDFLARE_IMAGE_MODEL: z.string().default('@cf/black-forest-labs/flux-1-schnell'),
 
   // --- Research / trending topics ------------------------------------------
   NEWS_API_KEY: z.string().optional(),

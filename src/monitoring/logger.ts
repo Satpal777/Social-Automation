@@ -48,6 +48,7 @@ export const logger: Logger = pino({
       'STABILITY_API_KEY',
       'LINKEDIN_CLIENT_SECRET',
       'TELEGRAM_BOT_TOKEN',
+      'CLOUDFLARE_API_TOKEN',
     ],
     censor: '[REDACTED]',
   },

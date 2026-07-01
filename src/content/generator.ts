@@ -132,9 +132,10 @@ export async function generateContent(
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      log.info({ attempt }, 'Generating content from LLM');
+      log.info({ attempt, tier: prompt.tier }, 'Generating content from LLM');
       const result = await llm.generate(prompt);
-      
+      log.info({ attempt, contentLength: result.content.length }, 'LLM response received, validating');
+
       const parsed = parseAndValidate(result.content, format);
       log.info('Content successfully generated and validated');
       return parsed;

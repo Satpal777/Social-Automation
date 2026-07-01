@@ -3,7 +3,7 @@ import { env } from '../../config/env.js';
 import { logger } from '../../monitoring/logger.js';
 import { withRetry } from '../../lib/retry.js';
 import { LLMProviderError } from '../../lib/errors.js';
-import type { ImageOptions, ImageProvider } from './types.js';
+import type { GeneratedImage, ImageOptions, ImageProvider } from './types.js';
 
 export class OpenAIImageProvider implements ImageProvider {
   private client: OpenAI | null = null;
@@ -20,11 +20,11 @@ export class OpenAIImageProvider implements ImageProvider {
     return this.client;
   }
 
-  async generate(prompt: string, options?: ImageOptions): Promise<Buffer> {
+  async generate(prompt: string, options?: ImageOptions): Promise<GeneratedImage> {
     const client = this.getClient();
     const model = env.OPENAI_IMAGE_MODEL || 'dall-e-3';
 
-    const runCall = async () => {
+    const runCall = async (): Promise<GeneratedImage> => {
       try {
         this.log.info({ model, promptLength: prompt.length }, 'Requesting image generation from OpenAI');
         const response = await client.images.generate({
@@ -41,7 +41,7 @@ export class OpenAIImageProvider implements ImageProvider {
           throw new LLMProviderError('OpenAI image generation returned empty b64 data');
         }
 
-        return Buffer.from(b64Data, 'base64');
+        return { buffer: Buffer.from(b64Data, 'base64'), mime: 'image/png' };
       } catch (err: any) {
         if (err instanceof LLMProviderError) throw err;
         throw new LLMProviderError(`OpenAI image generation failed: ${err.message}`, { cause: err });

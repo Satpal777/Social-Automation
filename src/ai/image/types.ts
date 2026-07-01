@@ -3,6 +3,12 @@ export interface ImageOptions {
   quality?: 'standard' | 'hd';
 }
 
+export interface GeneratedImage {
+  buffer: Buffer;
+  /** Actual format the provider produced — callers must not assume PNG. */
+  mime: 'image/png' | 'image/jpeg';
+}
+
 export interface ImageProvider {
-  generate(prompt: string, options?: ImageOptions): Promise<Buffer>;
+  generate(prompt: string, options?: ImageOptions): Promise<GeneratedImage>;
 }

@@ -1,8 +1,9 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { env } from '../config/env.js';
 import { logger } from '../monitoring/logger.js';
 import { contentItemRepository } from '../db/repositories/content-item.repository.js';
 import { reviewActionRepository } from '../db/repositories/review-action.repository.js';
+import { assetRepository } from '../db/repositories/asset.repository.js';
 import { prisma } from '../db/client.js';
 import { publish } from '../linkedin/publish.js';
 import { formatPostText } from '../linkedin/publishers/text.js';
@@ -25,7 +26,16 @@ const editingState = new Map<string, string>();
 function isAuthorizedChat(ctx: Context): boolean {
   const allowed = env.TELEGRAM_CHAT_ID;
   if (!allowed) return true;
-  return String(ctx.chat?.id) === allowed;
+
+  const actual = String(ctx.chat?.id);
+  const authorized = actual === allowed;
+  if (!authorized) {
+    log.warn(
+      { expectedChatId: allowed, actualChatId: actual },
+      'Ignoring command: chat id does not match TELEGRAM_CHAT_ID'
+    );
+  }
+  return authorized;
 }
 
 /**
@@ -40,8 +50,44 @@ export function initBot(): Bot | null {
 
   bot = new Bot(token);
 
+  log.info(
+    {
+      mode: env.TELEGRAM_USE_WEBHOOK ? 'webhook' : 'long-polling',
+      chatIdConfigured: Boolean(env.TELEGRAM_CHAT_ID),
+      chatId: env.TELEGRAM_CHAT_ID ?? null,
+    },
+    'Telegram bot instance created'
+  );
+
+  // Log every incoming update up front, before any command/auth filtering runs.
+  // If a command "does nothing", check whether it even shows up here — if not,
+  // the update never reached us (webhook/polling issue), not app logic.
+  bot.use(async (ctx, next) => {
+    log.info(
+      {
+        updateId: ctx.update.update_id,
+        chatId: ctx.chat?.id,
+        fromId: ctx.from?.id,
+        fromUsername: ctx.from?.username,
+        text: ctx.message?.text,
+      },
+      'Incoming Telegram update'
+    );
+    await next();
+  });
+
+  // Catch anything that escapes a handler's own try/catch — otherwise it's
+  // only printed to stderr by grammy and easy to miss in our logs.
+  bot.catch((err) => {
+    log.error(
+      { err: err.error, updateId: err.ctx.update.update_id },
+      'Unhandled error in Telegram bot middleware'
+    );
+  });
+
   // ── Commands ───────────────────────────────────────────────────────────
   bot.command('start', async (ctx) => {
+    log.info({ chatId: ctx.chat?.id }, 'Received /start command');
     await ctx.reply(
       '🤖 *LinkedIn Content Automation Bot* is active!\n\n' +
         'I deliver draft posts for review and notify you of publish actions.\n\n' +
@@ -55,6 +101,7 @@ export function initBot(): Bot | null {
   });
 
   bot.command('status', async (ctx) => {
+    log.info({ chatId: ctx.chat?.id }, 'Received /status command');
     if (!isAuthorizedChat(ctx)) return;
 
     const pendingCount = (await contentItemRepository.findByStatus('pending_review')).length;
@@ -69,15 +116,23 @@ export function initBot(): Bot | null {
   // On-demand generation: build a draft now and send it here for review.
   // Never auto-posts — publishing only happens if the user taps "Approve & Post".
   bot.command('generate', async (ctx) => {
+    log.info(
+      { chatId: ctx.chat?.id, fromId: ctx.from?.id, rawArgs: ctx.match },
+      'Received /generate command'
+    );
+
     if (!isAuthorizedChat(ctx)) return;
 
     const parsed = parseGenerateArgs(ctx.match);
     if (!parsed.ok) {
+      log.warn({ rawArgs: ctx.match, error: parsed.error }, '/generate argument parsing failed');
       await ctx.reply(`⚠️ ${parsed.error}`);
       return;
     }
 
     const { pillar, format } = parsed;
+    log.info({ pillar, format }, '/generate resolved pillar/format — starting content job');
+
     await ctx.reply(
       `⏳ Generating a *${format}* post for *${pillar}*… this can take a moment.`,
       { parse_mode: 'Markdown' }
@@ -85,6 +140,10 @@ export function initBot(): Bot | null {
 
     try {
       const item = await runContentJob({ pillar, format, mode: 'draft' });
+      log.info(
+        { contentItemId: item.id, status: item.status },
+        '/generate content job finished — routing to Telegram'
+      );
 
       // Polls can't be posted via the official API — deliver manual instructions.
       if (item.status === 'manual_required') {
@@ -92,6 +151,7 @@ export function initBot(): Bot | null {
       } else {
         await sendDraftToTelegram(item);
       }
+      log.info({ contentItemId: item.id }, '/generate draft delivered to Telegram');
     } catch (err: any) {
       log.error({ err, pillar, format }, 'On-demand /generate failed');
       await ctx.reply(`❌ Generation failed: ${err.message}`);
@@ -225,14 +285,28 @@ export function initBot(): Bot | null {
   if (env.TELEGRAM_USE_WEBHOOK) {
     const webhookUrl = `${env.APP_BASE_URL}/telegram/webhook`;
     log.info({ webhookUrl }, 'Registering Telegram Bot webhook');
-    bot.api.setWebhook(webhookUrl).catch((err) => {
-      log.error({ err }, 'Failed to register Telegram webhook');
-    });
+    bot.api
+      .setWebhook(webhookUrl)
+      .then(() => {
+        log.info({ webhookUrl }, 'Telegram webhook registered successfully');
+      })
+      .catch((err) => {
+        log.error({ err, webhookUrl }, 'Failed to register Telegram webhook');
+      });
   } else {
     log.info('Starting Telegram Bot long-polling');
-    bot.start().catch((err) => {
-      log.error({ err }, 'Error during Telegram Bot long polling');
-    });
+    bot
+      .start({
+        onStart: (botInfo) => {
+          log.info(
+            { username: botInfo.username, id: botInfo.id },
+            'Telegram long-polling started successfully — bot is receiving updates'
+          );
+        },
+      })
+      .catch((err) => {
+        log.error({ err }, 'Error during Telegram Bot long polling');
+      });
   }
 
   return bot;
@@ -265,14 +339,42 @@ Mode: \`${item.mode}\``;
 }
 
 /**
+ * Send any rendered visual asset (AI image, infographic, carousel PDF) for a
+ * content item ahead of the text preview. Approve/Reject/Edit callbacks rely
+ * on editing the *text* message, so the asset is sent as a separate message
+ * rather than as a photo caption.
+ */
+async function sendAssetPreview(chatId: string, item: ContentItem): Promise<void> {
+  try {
+    const assets = await assetRepository.findByContentItemId(item.id);
+    const asset = assets.find((a) => a.type === 'image' || a.type === 'infographic' || a.type === 'pdf');
+    if (!asset) return;
+
+    log.info({ contentItemId: item.id, assetType: asset.type, path: asset.path }, 'Sending asset preview to Telegram');
+    if (asset.type === 'pdf') {
+      await bot!.api.sendDocument(chatId, new InputFile(asset.path));
+    } else {
+      await bot!.api.sendPhoto(chatId, new InputFile(asset.path));
+    }
+  } catch (err) {
+    log.error({ err, contentItemId: item.id }, 'Failed to send asset preview to Telegram');
+  }
+}
+
+/**
  * Send a generated draft post to Telegram.
  */
 export async function sendDraftToTelegram(item: ContentItem): Promise<void> {
   const chatId = env.TELEGRAM_CHAT_ID;
   if (!bot || !chatId) {
-    log.warn('Telegram bot not initialized or TELEGRAM_CHAT_ID missing. Skipping draft send.');
+    log.warn(
+      { botInitialized: Boolean(bot), chatIdConfigured: Boolean(chatId), contentItemId: item.id },
+      'Telegram bot not initialized or TELEGRAM_CHAT_ID missing. Skipping draft send.'
+    );
     return;
   }
+
+  await sendAssetPreview(chatId, item);
 
   const text = buildTelegramPreview(item);
   const keyboard = new InlineKeyboard()
@@ -281,10 +383,17 @@ export async function sendDraftToTelegram(item: ContentItem): Promise<void> {
     .row()
     .text('✏️ Edit Body', `edit_${item.id}`);
 
-  await bot.api.sendMessage(chatId, text, {
-    parse_mode: 'Markdown',
-    reply_markup: keyboard,
-  });
+  log.info({ contentItemId: item.id, chatId }, 'Sending draft post to Telegram');
+  try {
+    await bot.api.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+    log.info({ contentItemId: item.id }, 'Draft post sent to Telegram successfully');
+  } catch (err) {
+    log.error({ err, contentItemId: item.id, chatId }, 'Failed to send draft post to Telegram');
+    throw err;
+  }
 }
 
 /**
@@ -312,7 +421,14 @@ export async function sendAlertToTelegram(
     context ? `\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`` : ''
   }`;
 
-  await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  log.info({ level, chatId }, 'Sending alert to Telegram');
+  try {
+    await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    log.info({ level }, 'Alert sent to Telegram successfully');
+  } catch (err) {
+    log.error({ err, level, chatId }, 'Failed to send alert to Telegram');
+    throw err;
+  }
 }
 
 /**
@@ -321,7 +437,10 @@ export async function sendAlertToTelegram(
 export async function sendManualRequiredToTelegram(item: ContentItem): Promise<void> {
   const chatId = env.TELEGRAM_CHAT_ID;
   if (!bot || !chatId) {
-    log.warn('Telegram bot not initialized or TELEGRAM_CHAT_ID missing. Skipping manual instruction.');
+    log.warn(
+      { botInitialized: Boolean(bot), chatIdConfigured: Boolean(chatId), contentItemId: item.id },
+      'Telegram bot not initialized or TELEGRAM_CHAT_ID missing. Skipping manual instruction.'
+    );
     return;
   }
 
@@ -347,5 +466,12 @@ ${formatPostText({
 })}
 \`\`\``;
 
-  await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  log.info({ contentItemId: item.id, chatId }, 'Sending manual-required instructions to Telegram');
+  try {
+    await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    log.info({ contentItemId: item.id }, 'Manual-required instructions sent to Telegram successfully');
+  } catch (err) {
+    log.error({ err, contentItemId: item.id, chatId }, 'Failed to send manual-required instructions to Telegram');
+    throw err;
+  }
 }

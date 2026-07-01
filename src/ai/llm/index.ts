@@ -1,4 +1,5 @@
 import { env } from '../../config/env.js';
+import { logger } from '../../monitoring/logger.js';
 import { ClaudeProvider } from './claude-provider.js';
 import { OpenAIProvider } from './openai-provider.js';
 import { OpenRouterProvider } from './openrouter-provider.js';
@@ -20,6 +21,7 @@ export function getLLMProvider(): LLMProvider {
   }
 
   const providerType = env.LLM_PROVIDER;
+  logger.info({ providerType }, 'Instantiating LLM provider');
 
   if (providerType === 'openai') {
     cachedProvider = new OpenAIProvider();
