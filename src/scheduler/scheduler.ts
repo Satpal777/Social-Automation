@@ -10,6 +10,7 @@ import {
 } from '../review/bot.js';
 import { logger } from '../monitoring/logger.js';
 import { fetchAnalytics } from '../analytics/index.js';
+import { env } from '../config/env.js';
 import type { ContentItem, Schedule } from '@prisma/client';
 
 const activeCronJobs = new Map<string, Cron>();
@@ -114,8 +115,8 @@ async function seedDefaultScheduleIfEmpty() {
     log.info('No posting schedules found in database. Seeding a default daily draft schedule.');
     await scheduleRepository.create({
       name: 'daily-morning-drafts',
-      cron: '0 9 * * *', // 9:00 AM daily
-      timezone: 'UTC',
+      cron: env.DAILY_POST_CRON,
+      timezone: env.TZ,
       pillarRotation: [
         'ai-technology-updates',
         'software-engineering',
